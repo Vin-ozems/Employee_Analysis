@@ -1,39 +1,54 @@
 # Employee_Analysis
 
 ## Project Overview
-This project analyzes Comcast customer complaint data to identify complaint volume, common issue channels and statuses, geographic complaint patterns, and repeat complainers. It also automates part of the complaint resolution workflow using a database trigger.
+This project is a SQL exercise set built on the classic open-source "employees" sample database, demonstrating a range of SQL techniques — from joins and subqueries to stored procedures, triggers, and custom functions — applied to real HR-style data (employees, departments, titles, salaries).
 
 ## Dataset Description
-**comcast** — a customer complaint log including:
-- Complaint identity: Id, Ticket (unique), Customer Complaint description
-- Timing: Date, Date_month_year, Time
-- Channel & location: Received Via, City, State, Zip code
-- Resolution: Status, Proxy (whether the complaint was handled via proxy)
+The standard **employees** sample database, consisting of related tables:
+- `employees`: employee number, name, gender, birth date, hire date
+- `departments`: department number and name
+- `dept_emp`: mapping of employees to departments over time (with from/to dates)
+- `titles`: job titles held by employees
+- `salaries`: salary history per employee (with from/to dates)
 
-Data cleaning confirmed no duplicate records and no missing values across all fields before analysis proceeded.
+## What This Project Demonstrates
 
-## Cleaning & Transformation Steps
-- **Date standardization**: Converted the string-based `Date` column into a proper `DATE` type
-- **Month extraction**: Derived a readable `month` name column from the `Date_month_year` field, then dropped the original raw column once the cleaner version was in place
+**Querying & Joins**
+- Average salary by department and gender, using multi-table joins across salaries, employees, dept_emp, and departments
+- Lowest and highest department numbers in use
+- Employees hired in a specific year
+- Filtering employees by job title (e.g. all "Engineer" and "Senior Engineer" title holders)
+- Counting high-value, long-duration salary contracts (≥ $100,000, lasting more than a year)
 
-## Key Findings
-- **Total complaint volume** was calculated across the full dataset.
-- **Status distribution** was ranked to identify the most common complaint status (e.g. Open, Solved, Pending).
-- **Complaints by city** were counted, showing geographic concentration of complaint volume.
-- **Most common intake channel** was identified (e.g. Customer Care Call, Internet, Email) by ranking `Received_Via`.
-- **Repeat complainers**: identified customers who filed more than 5 complaints, useful for flagging chronic service issues or particularly dissatisfied customers.
-- **Top 10 cities by complaint volume** were ranked using a window function (`ROW_NUMBER()`), giving a clear priority list for regional service investigation.
-- **Peak complaint month identified**: using a two-step CTE, the month with the single highest complaint volume was isolated.
+**Subqueries & Conditional Logic**
+- Retrieving each employee's lowest department number via a correlated subquery
+- Assigning manager IDs conditionally based on employee number ranges using CASE logic
+
+**Stored Procedures**
+- `la_dept(p_emp)`: given an employee number, returns their most recent department (number and name)
+
+**Triggers**
+- A `BEFORE INSERT` trigger on the `employees` table that automatically corrects any hire date set in the future, replacing it with the current date — preventing invalid future-dated hire records from being inserted
+
+**Custom Functions**
+- `f_highest_salary(p_emp_no)`: returns an employee's highest recorded salary
+- `f_lowest_salary(p_emp_no)`: returns an employee's lowest recorded salary
+- `f_salary(p_emp_no, p_min_or_max)`: a more flexible version that returns the min, max, or (if neither 'min' nor 'max' is passed) the salary range (max − min) for a given employee, based on a second input parameter
 
 ## Recommendation / Tool
-- **Automated status verification**: A trigger (`trg_UpdateStatusOnProxy`) automatically updates a complaint's status to "Verified" whenever a complaint is marked "Solved" and its Proxy field is "No" — removing a manual verification step from the resolution workflow and ensuring consistent status tracking without extra staff intervention.
-- **On-demand city ranking**: A stored procedure (`top_city()`) returns the top complaint-generating cities ranked by volume, ready to be called whenever an updated view is needed (e.g. for a weekly ops review) without rewriting the query each time.
+The custom functions and stored procedure in this script are reusable building blocks that could plug into a larger HR reporting system:
+- `f_salary()` in particular is a flexible, parameterized way to pull salary insights per employee without writing a new query each time
+- `la_dept()` gives instant lookup of an employee's current department, useful for HR lookups or org-chart tools
+- The hire-date trigger is a practical example of enforcing data integrity automatically at the database level, preventing bad data (future hire dates) from ever being stored
 
 ## Tools & Technology
 - MySQL
-- Window functions (`ROW_NUMBER()`) for ranking
-- CTEs for multi-step aggregation
-- Triggers and stored procedures for workflow automation
+- Stored procedures, triggers, and deterministic functions
+- Correlated subqueries and CASE-based conditional logic
 
 ## Notes
-- The "repeat complainers" query groups by `CustomerID` (aliased from `ID`), but `Id` is an auto-increment primary key — meaning each row already has a unique ID, so grouping by it will never return more than 1 row per group. This query likely needs to group by an actual customer identifier (e.g. name or a dedicated customer ID field) rather than the row's own primary key, assuming one exists elsewhere in the source data.
+A few issues in the script would need fixing before it runs cleanly:
+- **`la_dept` procedure (line 92)**: the join condition `e.emp_no = d.dept_no` compares an employee number to a department number, which looks like a typo — it likely should be `de.dept_no = d.dept_no` given the surrounding joins.
+- **`la_dept` procedure (line 95)**: references `p_emp_no`, but the procedure parameter is actually named `p_emp` — this mismatch would cause an error and should be corrected to match.
+- **Line 99 (`call e.la_dept(10010);`)**: procedures aren't called with a table alias prefix like `e.` — this should simply be `CALL la_dept(10010);`.
+- **Line 205–207**: functions are called as `employees.f_salary(...)`, using the database name as a prefix — this only works if explicitly qualifying the schema; if running inside the `employees` database already, `f_salary(...)` alone would suffice.
